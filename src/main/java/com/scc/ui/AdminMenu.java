@@ -12,6 +12,11 @@ public class AdminMenu {
     private final Scanner sc;
     private final UserDao userdao;
 
+    // NEW: the admin who is currently logged in + valid values for validation
+    private User currentAdmin;
+    private static final List<String> VALID_ROLES = List.of("ADMIN", "DISPATCHER", "DRIVER");
+    private static final List<String> VALID_STATUSES = List.of("APPROVED", "PENDING");
+
     // ===== NEW: yano nga data para sa 2, 3, 4 (in-memory) =====
     private record Vehicle(int id, String plate, String model, int capacity, String status) {}
     private record Driver(int id, String name, String license, String contact, String status) {}
@@ -30,6 +35,7 @@ public class AdminMenu {
     }
 
     public void display(User admin) {
+        this.currentAdmin = admin;   // NEW
         boolean loggedIn = true;
 
         while (loggedIn) {
@@ -89,16 +95,18 @@ public class AdminMenu {
             System.out.println("  [3] Update User ");
             System.out.println("  [4] Delete User");
             System.out.println("  [5] APPROVE PENDING USER ");
-            System.out.println("  [6] Back");
+            System.out.println("  [6] Update User Role & Status (Restricted)");   // NEW
+            System.out.println("  [7] Back");
             System.out.print("Enter choice: ");
             switch (sc.nextLine().trim()) {
                 case "1": createUser(); break;
                 case "2": readUsers(); break;
                 case "3": updateUser(); break;
                 case "4": deleteUser(); break;
-                case "5": approvePendingUser(); break;   // FIXED: kaniadto back = true
-                case "6": back = true; break;            // FIXED: ang Back kay 6 na
-                default: System.out.println("Invalid choice. Please enter a number from 1 to 6.");
+                case "5": approvePendingUser(); break;
+                case "6": updateUserRoleAndStatus(); break;   // NEW
+                case "7": back = true; break;                 // Back na ang katapusan
+                default: System.out.println("Invalid choice. Please enter a number from 1 to 7.");
             }
         }
     }
@@ -195,6 +203,90 @@ public class AdminMenu {
             System.out.printf(fmt, r[0], r[1], r[2], r[3], r[4]);
         }
         System.out.println(line);
+    }
+
+    // =====================================================================
+    //  NEW: UPDATE USER ROLE & STATUS (with validation)
+    // =====================================================================
+    private void updateUserRoleAndStatus() {
+        System.out.println("\n--- UPDATE USER ROLE & STATUS ---");
+
+        List<String[]> rows = userdao.getAllUsers();
+        if (rows.isEmpty()) {
+            System.out.println("No users found.");
+            return;
+        }
+        printUserTable(rows);
+
+        int targetUserId = readIntInput("Enter target User ID (0 to cancel)");
+        if (targetUserId == 0) {
+            System.out.println("Update cancelled.");
+            return;
+        }
+
+        // Self-edit restriction
+        if (targetUserId == currentAdmin.user_id()) {
+            System.out.println("WARNING: Modifying the currently active admin account is restricted.");
+            return;
+        }
+
+        if (userdao.findUserRow(targetUserId) == null) {
+            System.out.println("User not found.");
+            return;
+        }
+
+        String newRole = readValidRole();
+        if (newRole == null) {
+            System.out.println("Update cancelled.");
+            return;
+        }
+
+        String newStatus = readValidStatus();
+        if (newStatus == null) {
+            System.out.println("Update cancelled.");
+            return;
+        }
+
+        boolean ok = userdao.updateUserRoleAndStatus(targetUserId, newRole, newStatus);
+        System.out.println(ok
+                ? "SUCCESS: User " + targetUserId + " updated to role " + newRole
+                + " and status " + newStatus + "."
+                : "Update failed.");
+    }
+
+    // Returns the number typed. Re-prompts on letters/symbols instead of crashing.
+    private int readIntInput(String prompt) {
+        while (true) {
+            System.out.print(prompt + ": ");
+            String input = sc.nextLine().trim();
+            try {
+                return Integer.parseInt(input);
+            } catch (NumberFormatException e) {
+                System.out.println("  Invalid input! Please enter numbers only.");
+            }
+        }
+    }
+
+    // Keeps asking until a valid role is typed. Returns null if the admin enters 0.
+    private String readValidRole() {
+        while (true) {
+            System.out.print("Enter new role " + VALID_ROLES + " (0 to cancel): ");
+            String input = sc.nextLine().trim().toUpperCase();
+            if (input.equals("0")) return null;
+            if (VALID_ROLES.contains(input)) return input;
+            System.out.println("  Invalid role! Choose from: " + VALID_ROLES);
+        }
+    }
+
+    // Keeps asking until a valid status is typed. Returns null if the admin enters 0.
+    private String readValidStatus() {
+        while (true) {
+            System.out.print("Enter new status " + VALID_STATUSES + " (0 to cancel): ");
+            String input = sc.nextLine().trim().toUpperCase();
+            if (input.equals("0")) return null;
+            if (VALID_STATUSES.contains(input)) return input;
+            System.out.println("  Invalid status! Choose from: " + VALID_STATUSES);
+        }
     }
 
     // =====================================================================
