@@ -1,6 +1,8 @@
 package com.scc.ui;
 
+import com.scc.dao.ActivityLogDao;
 import com.scc.dao.UserDao;
+import com.scc.model.ActivityLog;
 import com.scc.model.User;
 
 import java.util.ArrayList;
@@ -11,6 +13,7 @@ public class AdminMenu {
 
     private final Scanner sc;
     private final UserDao userdao;
+    private final ActivityLogDao logDao = new ActivityLogDao();   // NEW: audit trail
 
     // NEW: the admin who is currently logged in + valid values for validation
     private User currentAdmin;
@@ -49,7 +52,7 @@ public class AdminMenu {
             System.out.println("  [3] Manage Driver Records");
             System.out.println("  [4] Manage Trip Schedules");
             System.out.println("  [5] Fleet Operations Summary Report");
-            System.out.println("  [6] System Activity Logs");
+            System.out.println("  [6] View System Audit Logs");
             System.out.println("  [0] Logout");
             System.out.println("------------------------------------------");
             System.out.print("Enter choice: ");
@@ -73,10 +76,11 @@ public class AdminMenu {
                     System.out.println("Fleet Operations Summary Report is not available yet.");
                     break;
                 case "6":
-                    System.out.println("System Activity Logs is not available yet.");
+                    viewAuditLogs();
                     break;
                 case "0":
                     System.out.println("Logging out... Goodbye, " + admin.name() + "!");
+                    audit("USER_LOGOUT", "User [" + admin.user_id() + "] " + admin.name() + " logged out");   // NEW LOG
                     loggedIn = false;
                     break;
                 default:
@@ -118,6 +122,7 @@ public class AdminMenu {
         String role = askText("Role (ADMIN/DISPATCHER/DRIVER)");
         boolean ok = userdao.addUser(name, username, password, role, "APPROVED");
         System.out.println(ok ? "User created." : "Failed to create user.");
+        if (ok) audit("USER_CREATED", "Admin [" + currentAdmin.user_id() + "] created account for username " + username);
     }
 
     // UPDATED: naay table na
@@ -138,8 +143,9 @@ public class AdminMenu {
         String password = sc.nextLine().trim();
         String role = askOptional("Role", u[3]);
         String status = askOptional("Status (APPROVED/PENDING)", u[4]);
-        System.out.println(userdao.updateUser(id, name, username, password, role, status)
-                ? "User updated." : "Update failed.");
+        boolean updated = userdao.updateUser(id, name, username, password, role, status);
+        System.out.println(updated ? "User updated." : "Update failed.");
+        if (updated) audit("USER_UPDATED", "Admin [" + currentAdmin.user_id() + "] updated profile of User " + id);
     }
 
     private void deleteUser() {
@@ -150,7 +156,9 @@ public class AdminMenu {
             return;
         }
         if (confirm("Delete user " + id + "?")) {
-            System.out.println(userdao.deleteUser(id) ? "User deleted." : "Delete failed.");
+            boolean deleted = userdao.deleteUser(id);
+            System.out.println(deleted ? "User deleted." : "Delete failed.");
+            if (deleted) audit("USER_DELETED", "Admin [" + currentAdmin.user_id() + "] deleted User ID " + id);
         }
     }
 
@@ -182,9 +190,11 @@ public class AdminMenu {
         }
 
         if (confirm("Approve user " + id + "?")) {
-            System.out.println(userdao.approveUser(id)
+            boolean approved = userdao.approveUser(id);
+            System.out.println(approved
                     ? "User approved! They can now log in."
                     : "Approval failed.");
+            if (approved) audit("USER_APPROVED", "Admin [" + currentAdmin.user_id() + "] approved account for User ID " + id);
         } else {
             System.out.println("Cancelled.");
         }
@@ -252,6 +262,8 @@ public class AdminMenu {
                 ? "SUCCESS: User " + targetUserId + " updated to role " + newRole
                 + " and status " + newStatus + "."
                 : "Update failed.");
+        if (ok) audit("USER_UPDATED", "Admin [" + currentAdmin.user_id() + "] changed role of User "
+                + targetUserId + " to " + newRole + " and status to " + newStatus);
     }
 
     // Returns the number typed. Re-prompts on letters/symbols instead of crashing.
@@ -321,6 +333,7 @@ public class AdminMenu {
                 askText("Status (Available/In Service/Maintenance)"));
         vehicles.add(v);
         System.out.println("Vehicle created with ID " + v.id() + ".");
+        audit("VEHICLE_CREATED", "Admin [" + currentAdmin.user_id() + "] added vehicle ID " + v.id() + " (" + v.plate() + ")");
     }
 
     private void readVehicles() {
@@ -343,14 +356,16 @@ public class AdminMenu {
                 askOptionalInt("Capacity", v.capacity()),
                 askOptional("Status", v.status())));
         System.out.println("Vehicle updated.");
+        audit("VEHICLE_UPDATED", "Admin [" + currentAdmin.user_id() + "] updated vehicle ID " + v.id());
     }
 
     private void deleteVehicle() {
         int index = findVehicleIndex(askInt("Vehicle ID to delete"));
         if (index < 0) { System.out.println("Vehicle not found."); return; }
         if (confirm("Delete this vehicle?")) {
-            vehicles.remove(index);
+            Vehicle removed = vehicles.remove(index);
             System.out.println("Vehicle deleted.");
+            audit("VEHICLE_DELETED", "Admin [" + currentAdmin.user_id() + "] deleted vehicle ID " + removed.id());
         }
     }
 
@@ -391,6 +406,7 @@ public class AdminMenu {
                 askText("Status (Active/On Leave/Inactive)"));
         drivers.add(d);
         System.out.println("Driver created with ID " + d.id() + ".");
+        audit("DRIVER_CREATED", "Admin [" + currentAdmin.user_id() + "] added driver ID " + d.id() + " (" + d.name() + ")");
     }
 
     private void readDrivers() {
@@ -413,14 +429,16 @@ public class AdminMenu {
                 askOptional("Contact", d.contact()),
                 askOptional("Status", d.status())));
         System.out.println("Driver updated.");
+        audit("DRIVER_UPDATED", "Admin [" + currentAdmin.user_id() + "] updated driver ID " + d.id());
     }
 
     private void deleteDriver() {
         int index = findDriverIndex(askInt("Driver ID to delete"));
         if (index < 0) { System.out.println("Driver not found."); return; }
         if (confirm("Delete this driver?")) {
-            drivers.remove(index);
+            Driver removed = drivers.remove(index);
             System.out.println("Driver deleted.");
+            audit("DRIVER_DELETED", "Admin [" + currentAdmin.user_id() + "] deleted driver ID " + removed.id());
         }
     }
 
@@ -467,6 +485,8 @@ public class AdminMenu {
                 "Scheduled");
         trips.add(t);
         System.out.println("Trip created with ID " + t.id() + ".");
+        audit("TRIP_CREATED", "Admin [" + currentAdmin.user_id() + "] scheduled trip ID " + t.id()
+                + " (" + t.origin() + " to " + t.destination() + ")");
     }
 
     private void readTrips() {
@@ -493,14 +513,16 @@ public class AdminMenu {
                 askOptional("Departure", t.departure()),
                 askOptional("Status (Scheduled/Ongoing/Completed/Cancelled)", t.status())));
         System.out.println("Trip updated.");
+        audit("TRIP_UPDATED", "Admin [" + currentAdmin.user_id() + "] updated trip ID " + t.id());
     }
 
     private void deleteTrip() {
         int index = findTripIndex(askInt("Trip ID to delete"));
         if (index < 0) { System.out.println("Trip not found."); return; }
         if (confirm("Delete this trip?")) {
-            trips.remove(index);
+            Trip removed = trips.remove(index);
             System.out.println("Trip deleted.");
+            audit("TRIP_DELETED", "Admin [" + currentAdmin.user_id() + "] deleted trip ID " + removed.id());
         }
     }
 
@@ -523,6 +545,80 @@ public class AdminMenu {
             if (findDriverIndex(id) >= 0) return id;
             System.out.println("  Driver ID " + id + " does not exist.");
         }
+    }
+
+    // =====================================================================
+    //  NEW: [6] SYSTEM AUDIT LOGS
+    // =====================================================================
+
+    // Shortcut: record an action done by the currently logged-in admin
+    private void audit(String actionType, String description) {
+        logDao.logAction(currentAdmin.user_id(), actionType, description);
+    }
+
+    private void viewAuditLogs() {
+        boolean back = false;
+        while (!back) {
+            System.out.println("\n--- SYSTEM AUDIT LOGS ---");
+            System.out.println("  [1] View All System Logs");
+            System.out.println("  [2] Filter Logs by User ID");
+            System.out.println("  [3] Clear All Logs");
+            System.out.println("  [0] Back");
+            System.out.print("Enter choice: ");
+            switch (sc.nextLine().trim()) {
+                case "1": printLogTable(logDao.getAllLogs()); break;
+                case "2": filterLogsByUser(); break;
+                case "3": clearAuditLogs(); break;
+                case "0": back = true; break;
+                default: System.out.println("Invalid choice. Please enter a number from 0 to 3.");
+            }
+        }
+    }
+
+    private void filterLogsByUser() {
+        int userId = readIntInput("Enter User ID to filter (0 to cancel)");
+        if (userId == 0) {
+            System.out.println("Cancelled.");
+            return;
+        }
+        printLogTable(logDao.getLogsByUserId(userId));
+    }
+
+    private void clearAuditLogs() {
+        if (!confirm("This permanently deletes ALL historical logs. Continue?")) {
+            System.out.println("Cancelled.");
+            return;
+        }
+        if (logDao.clearLogs()) {
+            System.out.println("All logs cleared.");
+            // keep a trace of who cleared the logs
+            audit("LOGS_CLEARED", "Admin [" + currentAdmin.user_id() + "] cleared all historical logs");
+        } else {
+            System.out.println("Failed to clear logs.");
+        }
+    }
+
+    private void printLogTable(List<ActivityLog> logs) {
+        if (logs.isEmpty()) {
+            System.out.println("No activity logs found.");
+            return;
+        }
+        String fmt = "%-5s | %-8s | %-18s | %-35s | %-20s%n";
+        String line = "-".repeat(5 + 3 + 8 + 3 + 18 + 3 + 35 + 3 + 20);
+
+        System.out.println(line);
+        System.out.printf(fmt, "ID", "USER ID", "ACTION", "DESCRIPTION", "TIMESTAMP");
+        System.out.println(line);
+        for (ActivityLog l : logs) {
+            String desc = (l.description() == null) ? "" : l.description();
+            String first = desc.length() > 35 ? desc.substring(0, 35) : desc;
+            System.out.printf(fmt, l.logId(), l.userId(), l.actionType(), first, l.timestamp());
+            // long descriptions continue on the next line(s) so the columns stay aligned
+            for (int i = 35; i < desc.length(); i += 35) {
+                System.out.printf(fmt, "", "", "", desc.substring(i, Math.min(i + 35, desc.length())), "");
+            }
+        }
+        System.out.println(line);
     }
 
     // =====================================================================
