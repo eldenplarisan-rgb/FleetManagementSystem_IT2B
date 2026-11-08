@@ -2,6 +2,7 @@ package com.scc.ui;
 
 import com.scc.dao.ActivityLogDao;
 import com.scc.dao.UserDao;
+import com.scc.dao.VehicleDao;
 import com.scc.model.ActivityLog;
 import com.scc.model.User;
 
@@ -14,6 +15,7 @@ public class AdminMenu {
     private final Scanner sc;
     private final UserDao userdao;
     private final ActivityLogDao logDao = new ActivityLogDao();   // NEW: audit trail
+    private final VehicleDao vehicleDao = new VehicleDao();       // NEW: vehicles saved in database
 
     // NEW: the admin who is currently logged in + valid values for validation
     private User currentAdmin;
@@ -29,12 +31,18 @@ public class AdminMenu {
     private final List<Vehicle> vehicles = new ArrayList<>();
     private final List<Driver> drivers = new ArrayList<>();
     private final List<Trip> trips = new ArrayList<>();
-    private int nextVehicleId = 1, nextDriverId = 1, nextTripId = 1;
+    private int nextDriverId = 1, nextTripId = 1;
     // ==========================================================
 
     public AdminMenu(Scanner sc, UserDao userdao) {
         this.sc = sc;
         this.userdao = userdao;
+
+        // NEW: i-load ang na-save nga vehicles gikan sa database inig start
+        for (String[] r : vehicleDao.getAllVehicles()) {
+            vehicles.add(new Vehicle(Integer.parseInt(r[0]), r[1], r[2],
+                    Integer.parseInt(r[3]), r[4]));
+        }
     }
 
     public void display(User admin) {
@@ -73,7 +81,7 @@ public class AdminMenu {
                     manageTrips();
                     break;
                 case "5":
-                    System.out.println("Fleet Operations Summary Report is not available yet.");
+                    showFleetSummaryReport();
                     break;
                 case "6":
                     viewAuditLogs();
@@ -136,13 +144,20 @@ public class AdminMenu {
         int id = askInt("User ID to update");
         String[] u = userdao.findUserRow(id);
         if (u == null) { System.out.println("User not found."); return; }
-        System.out.println("(Enter lang para dili usbon)");
-        String name = askOptional("Name", u[1]);
-        String username = askOptional("Username", u[2]);
-        System.out.print("New password [kept]: ");
-        String password = sc.nextLine().trim();
-        String role = askOptional("Role", u[3]);
-        String status = askOptional("Status (APPROVED/PENDING)", u[4]);
+
+        System.out.println("\nCurrent: " + u[1] + " | " + u[2] + " | " + u[3] + " | " + u[4]);
+        System.out.println("Enter the NEW details (required, dili pwede i-skip):");
+
+        String name = askText("New name");
+        String username = askText("New username");
+        String password = askText("New password");
+
+        String role = readValidRole();
+        if (role == null) { System.out.println("Update cancelled."); return; }
+
+        String status = readValidStatus();
+        if (status == null) { System.out.println("Update cancelled."); return; }
+
         boolean updated = userdao.updateUser(id, name, username, password, role, status);
         System.out.println(updated ? "User updated." : "Update failed.");
         if (updated) audit("USER_UPDATED", "Admin [" + currentAdmin.user_id() + "] updated profile of User " + id);
@@ -326,11 +341,18 @@ public class AdminMenu {
     }
 
     private void createVehicle() {
-        Vehicle v = new Vehicle(nextVehicleId++,
-                askText("Plate number"),
-                askText("Model"),
-                askInt("Seating capacity"),
-                askText("Status (Available/In Service/Maintenance)"));
+        String plate = askText("Plate number");
+        String model = askText("Model");
+        int capacity = askInt("Seating capacity");
+        String status = askText("Status (Available/In Service/Maintenance)");
+
+        // i-save sa database; ang database ang mohatag sa ID
+        int newId = vehicleDao.addVehicle(plate, model, capacity, status);
+        if (newId < 0) {
+            System.out.println("Failed to save vehicle.");
+            return;
+        }
+        Vehicle v = new Vehicle(newId, plate, model, capacity, status);
         vehicles.add(v);
         System.out.println("Vehicle created with ID " + v.id() + ".");
         audit("VEHICLE_CREATED", "Admin [" + currentAdmin.user_id() + "] added vehicle ID " + v.id() + " (" + v.plate() + ")");
@@ -350,11 +372,17 @@ public class AdminMenu {
         if (index < 0) { System.out.println("Vehicle not found."); return; }
         Vehicle v = vehicles.get(index);
         System.out.println("(Enter lang para dili usbon)");
-        vehicles.set(index, new Vehicle(v.id(),
+        Vehicle updatedVehicle = new Vehicle(v.id(),
                 askOptional("Plate", v.plate()),
                 askOptional("Model", v.model()),
                 askOptionalInt("Capacity", v.capacity()),
-                askOptional("Status", v.status())));
+                askOptional("Status", v.status()));
+        if (!vehicleDao.updateVehicle(updatedVehicle.id(), updatedVehicle.plate(), updatedVehicle.model(),
+                updatedVehicle.capacity(), updatedVehicle.status())) {
+            System.out.println("Update failed.");
+            return;
+        }
+        vehicles.set(index, updatedVehicle);
         System.out.println("Vehicle updated.");
         audit("VEHICLE_UPDATED", "Admin [" + currentAdmin.user_id() + "] updated vehicle ID " + v.id());
     }
@@ -363,6 +391,10 @@ public class AdminMenu {
         int index = findVehicleIndex(askInt("Vehicle ID to delete"));
         if (index < 0) { System.out.println("Vehicle not found."); return; }
         if (confirm("Delete this vehicle?")) {
+            if (!vehicleDao.deleteVehicle(vehicles.get(index).id())) {
+                System.out.println("Delete failed.");
+                return;
+            }
             Vehicle removed = vehicles.remove(index);
             System.out.println("Vehicle deleted.");
             audit("VEHICLE_DELETED", "Admin [" + currentAdmin.user_id() + "] deleted vehicle ID " + removed.id());
@@ -410,11 +442,31 @@ public class AdminMenu {
     }
 
     private void readDrivers() {
-        if (drivers.isEmpty()) { System.out.println("No drivers on record."); return; }
-        System.out.printf("%-5s %-22s %-16s %-14s %-10s%n", "ID", "NAME", "LICENSE", "CONTACT", "STATUS");
-        for (Driver d : drivers) {
-            System.out.printf("%-5d %-22s %-16s %-14s %-10s%n",
-                    d.id(), d.name(), d.license(), d.contact(), d.status());
+        // kuhaon ang tanang users nga DRIVER ang role gikan sa database
+        List<String[]> driverUsers = new ArrayList<>();
+        for (String[] r : userdao.getAllUsers()) {
+            if (r[3].equalsIgnoreCase("DRIVER")) driverUsers.add(r);
+        }
+
+        if (driverUsers.isEmpty() && drivers.isEmpty()) {
+            System.out.println("No drivers on record.");
+            return;
+        }
+
+        // 1) Driver accounts (gikan sa users table)
+        if (!driverUsers.isEmpty()) {
+            System.out.println("\n--- DRIVER ACCOUNTS (registered users) ---");
+            printUserTable(driverUsers);
+        }
+
+        // 2) Driver records nga gi-create manually (license/contact)
+        if (!drivers.isEmpty()) {
+            System.out.println("\n--- DRIVER RECORDS (license & contact) ---");
+            System.out.printf("%-5s %-22s %-16s %-14s %-10s%n", "ID", "NAME", "LICENSE", "CONTACT", "STATUS");
+            for (Driver d : drivers) {
+                System.out.printf("%-5d %-22s %-16s %-14s %-10s%n",
+                        d.id(), d.name(), d.license(), d.contact(), d.status());
+            }
         }
     }
 
@@ -472,10 +524,24 @@ public class AdminMenu {
     }
 
     private void createTrip() {
-        if (vehicles.isEmpty() || drivers.isEmpty()) {
-            System.out.println("Add at least one vehicle and one driver first.");
+        List<String[]> approvedDrivers = getApprovedDrivers();
+
+        if (vehicles.isEmpty()) {
+            System.out.println("Add at least one vehicle first.");
             return;
         }
+        if (approvedDrivers.isEmpty()) {
+            System.out.println("No APPROVED drivers found. Approve a DRIVER account first.");
+            return;
+        }
+
+        // ipakita ang available vehicles ug approved drivers
+        System.out.println("\n--- AVAILABLE VEHICLES ---");
+        readVehicles();
+        System.out.println("\n--- APPROVED DRIVERS ---");
+        printUserTable(approvedDrivers);
+        System.out.println();
+
         int vehicleId = askExistingVehicle("Vehicle ID", null);
         int driverId = askExistingDriver("Driver ID", null);
         Trip t = new Trip(nextTripId++, vehicleId, driverId,
@@ -542,9 +608,99 @@ public class AdminMenu {
     private int askExistingDriver(String label, Integer current) {
         while (true) {
             int id = (current == null) ? askInt(label) : askOptionalInt(label, current);
-            if (findDriverIndex(id) >= 0) return id;
-            System.out.println("  Driver ID " + id + " does not exist.");
+            if (isApprovedDriver(id)) return id;
+            System.out.println("  Driver ID " + id + " is not an APPROVED driver.");
         }
+    }
+
+    // kuhaon ang tanang users nga DRIVER ug APPROVED gikan sa database
+    private List<String[]> getApprovedDrivers() {
+        List<String[]> result = new ArrayList<>();
+        for (String[] r : userdao.getAllUsers()) {
+            if (r[3].equalsIgnoreCase("DRIVER") && r[4].equalsIgnoreCase("APPROVED")) {
+                result.add(r);
+            }
+        }
+        return result;
+    }
+
+    private boolean isApprovedDriver(int id) {
+        for (String[] r : getApprovedDrivers()) {
+            if (Integer.parseInt(r[0]) == id) return true;
+        }
+        return false;
+    }
+
+    // =====================================================================
+    //  [5] FLEET OPERATIONS SUMMARY REPORT
+    // =====================================================================
+    private void showFleetSummaryReport() {
+        // ---- Users ----
+        List<String[]> users = userdao.getAllUsers();
+        int admins = 0, dispatchers = 0, driverAccounts = 0, approved = 0, pending = 0;
+        for (String[] r : users) {
+            String role = r[3].toUpperCase();
+            if (role.equals("ADMIN")) admins++;
+            else if (role.equals("DISPATCHER")) dispatchers++;
+            else if (role.equals("DRIVER")) driverAccounts++;
+
+            if (r[4].equalsIgnoreCase("APPROVED")) approved++;
+            else if (r[4].equalsIgnoreCase("PENDING")) pending++;
+        }
+        int approvedDrivers = getApprovedDrivers().size();
+
+        String line = "=".repeat(46);
+        String fmt = "  %-30s : %d%n";
+
+        System.out.println("\n" + line);
+        System.out.println("   FLEET OPERATIONS SUMMARY REPORT");
+        System.out.println("   Generated by: " + currentAdmin.name());
+        System.out.println(line);
+
+        System.out.println("\n[ USER ACCOUNTS ]");
+        System.out.printf(fmt, "Total users", users.size());
+        System.out.printf(fmt, "Admins", admins);
+        System.out.printf(fmt, "Dispatchers", dispatchers);
+        System.out.printf(fmt, "Drivers (accounts)", driverAccounts);
+        System.out.printf(fmt, "Approved accounts", approved);
+        System.out.printf(fmt, "Pending approval", pending);
+
+        System.out.println("\n[ VEHICLES ]");
+        System.out.printf(fmt, "Total vehicles", vehicles.size());
+        System.out.printf(fmt, "Available", countVehiclesByStatus("Available"));
+        System.out.printf(fmt, "In Service", countVehiclesByStatus("In Service"));
+        System.out.printf(fmt, "Maintenance", countVehiclesByStatus("Maintenance"));
+
+        System.out.println("\n[ DRIVERS ]");
+        System.out.printf(fmt, "Approved drivers (can be assigned)", approvedDrivers);
+        System.out.printf(fmt, "Manual driver records", drivers.size());
+
+        System.out.println("\n[ TRIP SCHEDULES ]");
+        System.out.printf(fmt, "Total trips", trips.size());
+        System.out.printf(fmt, "Scheduled", countTripsByStatus("Scheduled"));
+        System.out.printf(fmt, "Ongoing", countTripsByStatus("Ongoing"));
+        System.out.printf(fmt, "Completed", countTripsByStatus("Completed"));
+        System.out.printf(fmt, "Cancelled", countTripsByStatus("Cancelled"));
+
+        System.out.println("\n" + line);
+
+        audit("REPORT_VIEWED", "Admin [" + currentAdmin.user_id() + "] viewed the Fleet Operations Summary Report");
+    }
+
+    private int countVehiclesByStatus(String status) {
+        int count = 0;
+        for (Vehicle v : vehicles) {
+            if (v.status().equalsIgnoreCase(status)) count++;
+        }
+        return count;
+    }
+
+    private int countTripsByStatus(String status) {
+        int count = 0;
+        for (Trip t : trips) {
+            if (t.status().equalsIgnoreCase(status)) count++;
+        }
+        return count;
     }
 
     // =====================================================================
