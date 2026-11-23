@@ -135,6 +135,18 @@ public class UserDao {
         return rows;
     }
 
+    // NEW: READ -> APPROVED users nga DRIVER ang role -> {id, name, username, role, status}
+    // (gigamit sa DispatcherMenu)
+    public List<String[]> getApprovedDrivers() {
+        List<String[]> rows = new ArrayList<>();
+        for (String[] r : getAllUsers()) {
+            if (r[3].equalsIgnoreCase("DRIVER") && r[4].equalsIgnoreCase("APPROVED")) {
+                rows.add(r);
+            }
+        }
+        return rows;
+    }
+
     // READ (one) -> {id, name, username, role, status} or null kung wala
     public String[] findUserRow(int id) {
         String sql = "SELECT user_id, name, username, roles, status FROM users WHERE user_id = ?";

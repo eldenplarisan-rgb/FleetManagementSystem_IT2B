@@ -55,13 +55,13 @@ public class AdminMenu {
             System.out.println("  SCHEDULING SYSTEM");
             System.out.println("  ADMIN MENU  | Logged in: " + admin.name());
             System.out.println("==========================================");
-            System.out.println("  [1] Manage User Accounts");
-            System.out.println("  [2] Manage Vehicle Records");
-            System.out.println("  [3] Manage Driver Records");
-            System.out.println("  [4] Manage Trip Schedules");
-            System.out.println("  [5] Fleet Operations Summary Report");
-            System.out.println("  [6] View System Audit Logs");
-            System.out.println("  [0] Logout");
+                System.out.println("  [1] Manage User Accounts");
+                System.out.println("  [2] Manage Vehicle Records");
+                System.out.println("  [3] Manage Driver Records");
+                System.out.println("  [4] Manage Trip Schedules");
+                System.out.println("  [5] Fleet Operations Summary Report");
+                System.out.println("  [6] View System Audit Logs");
+                System.out.println("  [7] Logout");
             System.out.println("------------------------------------------");
             System.out.print("Enter choice: ");
 

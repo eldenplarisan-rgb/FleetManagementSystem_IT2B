@@ -75,6 +75,29 @@ public class VehicleDao {
         return rows;
     }
 
+    // NEW: one vehicle -> {id, plate, model, capacity, status} or null kung wala
+    public String[] findVehicle(int id) {
+        String sql = "SELECT vehicle_id, plate, model, capacity, status FROM vehicles WHERE vehicle_id = ?";
+        try (Connection c = DriverManager.getConnection(URL);
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setInt(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return new String[]{
+                            String.valueOf(rs.getInt("vehicle_id")),
+                            rs.getString("plate"),
+                            rs.getString("model"),
+                            String.valueOf(rs.getInt("capacity")),
+                            rs.getString("status")
+                    };
+                }
+            }
+        } catch (SQLException e) {
+            System.out.println("Find vehicle error: " + e.getMessage());
+        }
+        return null;
+    }
+
     public boolean updateVehicle(int id, String plate, String model, int capacity, String status) {
         String sql = "UPDATE vehicles SET plate = ?, model = ?, capacity = ?, status = ? WHERE vehicle_id = ?";
         try (Connection c = DriverManager.getConnection(URL);
